@@ -3,16 +3,19 @@ import sqlite3
 import requests
 from flask import Flask, render_template, redirect, url_for, g
 from datetime import datetime, timedelta
+import logging
+import websocket # For WebSocket API interaction
+import json
+from urllib.parse import urlparse
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.urandom(24) # For session management, if needed later
+app.config['SECRET_KEY'] = os.urandom(24)
 
-# Configuration from environment variables
-HA_URL = os.environ.get('HA_URL')
-HA_TOKEN = os.environ.get('HA_TOKEN')
+app.logger.setLevel(logging.INFO) # Set logging level to INFO by default
 
-if not HA_URL or not HA_TOKEN:
-    raise ValueError("HA_URL and HA_TOKEN environment variables must be set.")
+# Configuration (temporarily hardcoded for testing)
+HA_URL = "http://192.168.2.200:8123"
+HA_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIyZmUyNmE3OGZlNDU0YjU5YTY5ZGQ0Yzk1YjI1MjRmOCIsImlhdCI6MTc0OTI4OTQ5MiwiZXhwIjoyMDY0NjQ5NDkyfQ.4L9gU22nBNY2fl0M_--WHBJ5_Bp8AlseIU5GAXhTuuk"
 
 HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -26,7 +29,7 @@ def get_db():
     if db is None:
         os.makedirs(os.path.dirname(DATABASE), exist_ok=True)
         db = g._database = sqlite3.connect(DATABASE)
-        db.row_factory = sqlite3.Row # This allows accessing columns by name
+        db.row_factory = sqlite3.Row
     return db
 
 @app.teardown_appcontext
@@ -48,20 +51,24 @@ def init_db():
         ''')
         db.commit()
 
-# Initialize database on app startup
 with app.app_context():
     init_db()
 
-def fetch_ha_data(endpoint):
+def fetch_ha_data_rest(endpoint):
+    """Fetches data from Home Assistant REST API."""
     try:
         response = requests.get(f"{HA_URL}/api/{endpoint}", headers=HEADERS)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        if endpoint == 'config/area_registry' or endpoint == 'config/entity_registry':
+            app.logger.debug(f"HA REST API Response for {endpoint}: {data}") # Only debug log for specific endpoints
+        return data
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"Error fetching data from Home Assistant API at {endpoint}: {e}")
+        app.logger.error(f"Error fetching data from Home Assistant REST API at {endpoint}: {e}")
         return None
 
 def call_ha_service(domain, service, entity_id):
+    """Calls a service on Home Assistant REST API."""
     try:
         data = {"entity_id": entity_id}
         response = requests.post(f"{HA_URL}/api/services/{domain}/{service}", headers=HEADERS, json=data)
@@ -72,33 +79,124 @@ def call_ha_service(domain, service, entity_id):
         return None
 
 def get_all_scripts_and_scenes():
-    scripts = fetch_ha_data('states')
-    if scripts is None:
+    """
+    Fetches all scripts and scenes, and their associated area_ids using WebSocket API.
+    Combines data from states and entity registry.
+    """
+    all_states = fetch_ha_data_rest('states')
+    if all_states is None:
+        app.logger.debug("No states data fetched from HA.")
         return []
 
+    # Determine WebSocket URL
+    parsed = urlparse(HA_URL)
+    ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
+    ws_url = f"{ws_scheme}://{parsed.netloc}/api/websocket"
+
+    entity_area_map = {}
+    
+    try:
+        ws = websocket.create_connection(ws_url)
+        
+        # Receive auth_required
+        auth_req = json.loads(ws.recv())
+        if auth_req.get('type') != 'auth_required':
+            app.logger.error(f"Unexpected WS response during auth_required: {auth_req.get('type', '')}")
+            raise RuntimeError('Unexpected WS response during auth_required.')
+
+        # Authenticate
+        ws.send(json.dumps({'type': 'auth', 'access_token': HA_TOKEN}))
+        auth_res = json.loads(ws.recv())
+        if auth_res.get('type') != 'auth_ok':
+            app.logger.error(f"WS authentication failed: {auth_res.get('message', '')}")
+            raise RuntimeError('WS auth failed.')
+
+        # Request entity registry
+        ws.send(json.dumps({'id': 1, 'type': 'config/entity_registry/list'}))
+        er_res = json.loads(ws.recv())
+        app.logger.debug(f"HA WS Entity Registry Response: {er_res}")
+        
+        for entry in er_res.get('result', []):
+            eid = entry.get('entity_id')
+            if eid: # Ensure entity_id exists
+                entity_area_map[eid] = entry.get('area_id')
+
+        ws.close()
+    except Exception as e:
+        app.logger.error(f"WebSocket error during entity/area registry fetch: {e}")
+        # Proceed with potentially incomplete maps if WebSocket fails
+
+    app.logger.debug(f"Entity Area Map from WS Registry: {entity_area_map}") # Keep this debug log
+
     entities = []
-    for entity in scripts:
-        if entity['entity_id'].startswith(('script.', 'scene.')):
+    for state_entity in all_states:
+        entity_id = state_entity['entity_id']
+        if entity_id.startswith(('script.', 'scene.')):
+            name = state_entity['attributes'].get('friendly_name', entity_id)
+            area_id = entity_area_map.get(entity_id) # Get area_id from the WebSocket-fetched map
+
             entities.append({
-                'entity_id': entity['entity_id'],
-                'name': entity['attributes'].get('friendly_name', entity['entity_id']),
-                'area_id': entity['attributes'].get('area_id')
+                'entity_id': entity_id,
+                'name': name,
+                'area_id': area_id
             })
+    app.logger.debug(f"Processed Scripts and Scenes with Areas: {entities}") # Keep this debug log
     return entities
 
 def get_areas():
-    areas_data = fetch_ha_data('config/areas')
-    if areas_data is None:
-        return {}
-    return {area['area_id']: area['name'] for area in areas_data}
+    """Fetches areas from Home Assistant WebSocket API."""
+    # Determine WebSocket URL
+    parsed = urlparse(HA_URL)
+    ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
+    ws_url = f"{ws_scheme}://{parsed.netloc}/api/websocket"
+
+    areas_map = {}
+    
+    try:
+        ws = websocket.create_connection(ws_url)
+        
+        # Receive auth_required
+        auth_req = json.loads(ws.recv())
+        if auth_req.get('type') != 'auth_required':
+            app.logger.error(f"Unexpected WS response during auth_required: {auth_req.get('type', '')}")
+            raise RuntimeError('Unexpected WS response during auth_required.')
+
+        # Authenticate
+        ws.send(json.dumps({'type': 'auth', 'access_token': HA_TOKEN}))
+        auth_res = json.loads(ws.recv())
+        if auth_res.get('type') != 'auth_ok':
+            app.logger.error(f"WS authentication failed: {auth_res.get('message', '')}")
+            raise RuntimeError('WS auth failed.')
+
+        # Request area registry
+        ws.send(json.dumps({'id': 1, 'type': 'config/area_registry/list'}))
+        ar_res = json.loads(ws.recv())
+        app.logger.debug(f"HA WS Area Registry Response: {ar_res}")
+        
+        for area in ar_res.get('result', []):
+            aid = area.get('area_id')
+            name = area.get('name') or 'Unnamed Area'
+            areas_map[aid] = name
+
+        ws.close()
+    except Exception as e:
+        app.logger.error(f"WebSocket error during area registry fetch: {e}")
+        # Proceed with empty areas_map if WebSocket fails
+
+    app.logger.debug(f"Processed Areas Map: {areas_map}") # Keep this debug log
+    return areas_map
 
 @app.route('/')
 def home():
     all_entities = get_all_scripts_and_scenes()
     areas_map = get_areas()
 
+    # Keep these debug logs for diagnosing area display
+    app.logger.debug(f"Home Route - All Entities: {all_entities}")
+    app.logger.debug(f"Home Route - Areas Map: {areas_map}")
+
     # Group entities by area
-    entities_by_area = {"other": []} # "other" for entities without an area_id
+    entities_by_area = {"other": []} # "other" for entities without an area_id or unmapped area_id
     for area_id in areas_map:
         entities_by_area[area_id] = []
 
@@ -108,21 +206,25 @@ def home():
             entities_by_area[area_id].append(entity)
         else:
             entities_by_area["other"].append(entity)
+    app.logger.debug(f"Home Route - Entities by Area: {entities_by_area}") # Keep this debug log
 
     # Prepare areas for display
     display_areas = []
     if entities_by_area["other"]:
         display_areas.append({"area_id": "other", "name": "Other"})
 
+    # Sort actual areas by name and add them if they contain entities
     sorted_area_names = sorted([name for id, name in areas_map.items()])
     for area_name in sorted_area_names:
         for area_id, name in areas_map.items():
-            if name == area_name and entities_by_area.get(area_id): # Only add if there are entities in the area
+            if name == area_name and entities_by_area.get(area_id):
                 display_areas.append({"area_id": area_id, "name": name})
-                break # Found the area, move to next sorted name
+                break
+    app.logger.debug(f"Home Route - Display Areas: {display_areas}") # Keep this debug log
 
     # Get most used scripts/scenes
     most_used = get_most_used_entities()
+    app.logger.debug(f"Home Route - Most Used Entities: {most_used}") # Keep this debug log
 
     return render_template('home.html', most_used=most_used, areas=display_areas)
 
@@ -133,12 +235,12 @@ def area_detail(area_id):
 
     if area_id == "other":
         area_name = "Other"
-        filtered_entities = [e for e in all_entities if e.get('area_id') not in areas_map]
+        # Filter for entities whose area_id is None or not found in areas_map
+        filtered_entities = [e for e in all_entities if e.get('area_id') is None or e.get('area_id') not in areas_map]
     else:
         area_name = areas_map.get(area_id, "Unknown Area")
         filtered_entities = [e for e in all_entities if e.get('area_id') == area_id]
 
-    # Sort entities alphabetically by name
     filtered_entities.sort(key=lambda x: x['name'].lower())
 
     return render_template('area.html', area_name=area_name, entities=filtered_entities)
@@ -146,9 +248,8 @@ def area_detail(area_id):
 @app.route('/activate/<entity_id>')
 def activate_entity(entity_id):
     domain = entity_id.split('.')[0]
-    service = "turn_on" # Scripts and scenes typically use 'turn_on'
+    service = "turn_on"
 
-    # Log usage
     db = get_db()
     cursor = db.cursor()
     cursor.execute("INSERT INTO usage_log (entity_id) VALUES (?)", (entity_id,))
@@ -161,13 +262,11 @@ def get_most_used_entities():
     db = get_db()
     cursor = db.cursor()
 
-    # Calculate time window: last 30 days, current time +/- 1 hour
     now = datetime.now()
     start_time_window = (now - timedelta(hours=1)).time()
     end_time_window = (now + timedelta(hours=1)).time()
     thirty_days_ago = now - timedelta(days=30)
 
-    # Fetch usage data within the last 30 days
     cursor.execute('''
         SELECT entity_id, COUNT(*) as count, STRFTIME('%H:%M:%S', timestamp) as time_of_day
         FROM usage_log
@@ -177,23 +276,19 @@ def get_most_used_entities():
     ''', (thirty_days_ago,))
     raw_usage_data = cursor.fetchall()
 
-    # Filter by time window and aggregate counts
     filtered_usage = {}
     for row in raw_usage_data:
         log_time = datetime.strptime(row['time_of_day'], '%H:%M:%S').time()
-        # Check if log_time falls within the current time window
-        if start_time_window <= end_time_window: # Normal case (e.g., 10:00-12:00)
+        if start_time_window <= end_time_window:
             if start_time_window <= log_time <= end_time_window:
                 filtered_usage[row['entity_id']] = filtered_usage.get(row['entity_id'], 0) + row['count']
-        else: # Case where window crosses midnight (e.g., 23:00-01:00)
+        else:
             if log_time >= start_time_window or log_time <= end_time_window:
                 filtered_usage[row['entity_id']] = filtered_usage.get(row['entity_id'], 0) + row['count']
 
-    # Get friendly names for entities
     all_entities = get_all_scripts_and_scenes()
     entity_name_map = {e['entity_id']: e['name'] for e in all_entities}
 
-    # Sort by count and prepare for display
     most_used_list = []
     for entity_id, count in sorted(filtered_usage.items(), key=lambda item: item[1], reverse=True):
         if entity_id in entity_name_map:
@@ -205,4 +300,4 @@ def get_most_used_entities():
     return most_used_list
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5003)

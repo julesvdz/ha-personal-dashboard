@@ -60,10 +60,11 @@ h1, h2 {
     text-align: center;
     transition: background-color 0.2s ease, transform 0.1s ease;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    white-space: nowrap; /* Prevent text wrapping */
-    overflow: hidden; /* Hide overflow text */
-    text-overflow: ellipsis; /* Show ellipsis for overflow */
-    min-height: 50px; /* Ensure consistent button height */
+    white-space: normal; /* Allow text wrapping */
+    word-wrap: break-word; /* Break long words if necessary */
+    hyphens: auto; /* Add hyphens for better word breaking */
+    min-height: 50px; /* Minimum height for consistency */
+    line-height: 1.3; /* Tighter line spacing for wrapped text */
 }
 
 .button:hover {
