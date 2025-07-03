@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  homeassistant-dashboard:
+    build: .
+    ports:
+      - "5003:5003"
+    environment:
+      # Replace with your Home Assistant URL (e.g., http://homeassistant.local:8123)
+      HA_URL: "http://192.168.2.200:8123"
+      # Replace with your long-lived access token
+      HA_TOKEN: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIyZmUyNmE3OGZlNDU0YjU5YTY5ZGQ0Yzk1YjI1MjRmOCIsImlhdCI6MTc0OTI4OTQ5MiwiZXhwIjoyMDY0NjQ5NDkyfQ.4L9gU22nBNY2fl0M_--WHBJ5_Bp8AlseIU5GAXhTuuk"
+    volumes:
+      - ./data:/app/data # For SQLite database persistence
+    restart: unless-stopped

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+    <h1>Home Assistant Dashboard</h1>
+
+    <div class="section">
+        <h2>Most Used Scripts/Scenes (Last 30 Days, Current Time ±1hr)</h2>
+        {% if most_used %}
+            <div class="button-grid">
+                {% for entity in most_used %}
+                    <a href="{{ url_for('activate_entity', entity_id=entity.entity_id) }}" class="button">{{ entity.name }}</a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p>No usage data available or no scripts/scenes used recently at this time.</p>
+        {% endif %}
+    </div>
+
+    <div class="section">
+        <h2>Areas</h2>
+        <div class="button-grid">
+            {% for area in areas %}
+                <a href="{{ url_for('area_detail', area_id=area.area_id) }}" class="button">{{ area.name }}</a>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}

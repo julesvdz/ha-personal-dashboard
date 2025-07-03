@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{{ area_name }}{% endblock %}
+
+{% block content %}
+    <h1>{{ area_name }}</h1>
+
+    <div class="button-grid">
+        {% if entities %}
+            {% for entity in entities %}
+                <a href="{{ url_for('activate_entity', entity_id=entity.entity_id) }}" class="button">{{ entity.name }}</a>
+            {% endfor %}
+        {% else %}
+            <p>No scripts or scenes found for this area.</p>
+        {% endif %}
+    </div>
+
+    <div class="back-button-container">
+        <a href="{{ url_for('home') }}" class="button back-button">Back to Home</a>
+    </div>
+{% endblock %}
