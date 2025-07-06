@@ -13,9 +13,9 @@ app.config['SECRET_KEY'] = os.urandom(24)
 
 app.logger.setLevel(logging.INFO) # Set logging level to INFO by default
 
-# Configuration (temporarily hardcoded for testing)
-HA_URL = "http://192.168.2.200:8123"
-HA_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIyZmUyNmE3OGZlNDU0YjU5YTY5ZGQ0Yzk1YjI1MjRmOCIsImlhdCI6MTc0OTI4OTQ5MiwiZXhwIjoyMDY0NjQ5NDkyfQ.4L9gU22nBNY2fl0M_--WHBJ5_Bp8AlseIU5GAXhTuuk"
+# Configuration 
+HA_URL = "<YOUR HA URL AND PORT>"
+HA_TOKEN = "<YOUR API KEY>"
 
 HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
