@@ -61,6 +61,7 @@ h2 {
     cursor: pointer;
     position: relative;
     overflow: hidden;
+    z-index: 1;
 }
 
 .button::before {
@@ -74,6 +75,7 @@ h2 {
     opacity: 0;
     transition: opacity 0.3s ease;
     border-radius: 16px;
+    z-index: -1;
 }
 
 .button:hover::before {
@@ -89,9 +91,11 @@ h2 {
     transform: translateY(-1px);
 }
 
-.button span {
+/* Ensure text is always visible */
+.button * {
     position: relative;
-    z-index: 1;
+    z-index: 2;
+    color: white !important;
 }
 
 /* Special styling for most-used buttons */
@@ -126,9 +130,18 @@ h2 {
     transform: none !important;
 }
 
+.button:disabled * {
+    color: white !important;
+}
+
 .button.activating {
     background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%) !important;
     animation: pulse 1.5s infinite;
+}
+
+.button.activating * {
+    color: white !important;
+    z-index: 2 !important;
 }
 
 .button.success {
@@ -136,9 +149,19 @@ h2 {
     box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
 }
 
+.button.success * {
+    color: white !important;
+    z-index: 2 !important;
+}
+
 .button.error {
     background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
+}
+
+.button.error * {
+    color: white !important;
+    z-index: 2 !important;
 }
 
 @keyframes pulse {

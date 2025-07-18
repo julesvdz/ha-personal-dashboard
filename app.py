@@ -7,6 +7,8 @@ import logging
 import websocket # For WebSocket API interaction
 import json
 from urllib.parse import urlparse
+import threading
+import time
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
@@ -14,8 +16,8 @@ app.config['SECRET_KEY'] = os.urandom(24)
 app.logger.setLevel(logging.INFO) # Set logging level to INFO by default
 
 # Configuration 
-HA_URL = "<YOUR HA URL AND PORT>"
-HA_TOKEN = "<YOUR API KEY>"
+HA_URL = "<YOUR HA_URL>"
+HA_TOKEN = "<YOUR API TOKEN>"
 
 HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -23,6 +25,75 @@ HEADERS = {
 }
 
 DATABASE = 'data/usage.db'
+
+# Cache system
+class DataCache:
+    def __init__(self):
+        self.cache = {}
+        self.lock = threading.Lock()
+        self.cache_duration = 86400 * 7  # 7 days cache duration
+        self.cache_file = os.path.join('data', 'cache.json')
+        self._load_cache_from_disk()
+        
+    def _load_cache_from_disk(self):
+        """Load cache from disk on startup."""
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, 'r') as f:
+                    disk_cache = json.load(f)
+                    with self.lock:
+                        self.cache = disk_cache
+                app.logger.info(f"Loaded cache from disk with {len(self.cache)} entries")
+        except Exception as e:
+            app.logger.error(f"Error loading cache from disk: {e}")
+    
+    def _save_cache_to_disk(self):
+        """Save cache to disk."""
+        try:
+            os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+            with open(self.cache_file, 'w') as f:
+                with self.lock:
+                    json.dump(self.cache, f)
+        except Exception as e:
+            app.logger.error(f"Error saving cache to disk: {e}")
+        
+    def get(self, key):
+        with self.lock:
+            if key in self.cache:
+                data, timestamp = self.cache[key]
+                if time.time() - timestamp < self.cache_duration:
+                    return data
+                else:
+                    # Remove expired cache entry
+                    del self.cache[key]
+                    self._save_cache_to_disk()
+            return None
+    
+    def set(self, key, data):
+        with self.lock:
+            self.cache[key] = (data, time.time())
+        # Save to disk in background thread to avoid blocking
+        threading.Thread(target=self._save_cache_to_disk, daemon=True).start()
+    
+    def is_stale(self, key):
+        with self.lock:
+            if key in self.cache:
+                _, timestamp = self.cache[key]
+                # Consider stale if older than 1 hour for background refresh
+                return time.time() - timestamp > 3600
+            return True
+    
+    def clear_cache_pattern(self, pattern):
+        """Clear cache entries matching a pattern."""
+        with self.lock:
+            keys_to_remove = [key for key in self.cache.keys() if pattern in key]
+            for key in keys_to_remove:
+                del self.cache[key]
+        # Save to disk in background thread
+        threading.Thread(target=self._save_cache_to_disk, daemon=True).start()
+
+# Global cache instance
+data_cache = DataCache()
 
 def get_db():
     db = getattr(g, '_database', None)
@@ -82,7 +153,27 @@ def get_all_scripts_and_scenes():
     """
     Fetches all scripts and scenes, and their associated area_ids using WebSocket API.
     Combines data from states and entity registry.
+    Uses cache-first approach with background refresh.
     """
+    cache_key = 'scripts_and_scenes'
+    cached_data = data_cache.get(cache_key)
+    
+    # Return cached data if available
+    if cached_data is not None:
+        app.logger.debug("Returning cached scripts and scenes data")
+        # Start background refresh if cache is stale
+        if data_cache.is_stale(cache_key):
+            threading.Thread(target=_refresh_scripts_and_scenes_cache, daemon=True).start()
+        return cached_data
+    
+    # No cache available, fetch immediately
+    app.logger.debug("No cache available, fetching scripts and scenes immediately")
+    entities = _fetch_scripts_and_scenes()
+    data_cache.set(cache_key, entities)
+    return entities
+
+def _fetch_scripts_and_scenes():
+    """Internal function to fetch scripts and scenes from Home Assistant."""
     all_states = fetch_ha_data_rest('states')
     if all_states is None:
         app.logger.debug("No states data fetched from HA.")
@@ -143,8 +234,40 @@ def get_all_scripts_and_scenes():
     app.logger.debug(f"Processed Scripts and Scenes with Areas: {entities}") # Keep this debug log
     return entities
 
+def _refresh_scripts_and_scenes_cache():
+    """Background thread function to refresh scripts and scenes cache."""
+    try:
+        app.logger.debug("Background refresh of scripts and scenes cache started")
+        entities = _fetch_scripts_and_scenes()
+        data_cache.set('scripts_and_scenes', entities)
+        app.logger.debug("Background refresh of scripts and scenes cache completed")
+    except Exception as e:
+        app.logger.error(f"Error during background refresh of scripts and scenes: {e}")
+
 def get_areas():
-    """Fetches areas from Home Assistant WebSocket API."""
+    """
+    Fetches areas from Home Assistant WebSocket API.
+    Uses cache-first approach with background refresh.
+    """
+    cache_key = 'areas'
+    cached_data = data_cache.get(cache_key)
+    
+    # Return cached data if available
+    if cached_data is not None:
+        app.logger.debug("Returning cached areas data")
+        # Start background refresh if cache is stale
+        if data_cache.is_stale(cache_key):
+            threading.Thread(target=_refresh_areas_cache, daemon=True).start()
+        return cached_data
+    
+    # No cache available, fetch immediately
+    app.logger.debug("No cache available, fetching areas immediately")
+    areas_map = _fetch_areas()
+    data_cache.set(cache_key, areas_map)
+    return areas_map
+
+def _fetch_areas():
+    """Internal function to fetch areas from Home Assistant."""
     # Determine WebSocket URL
     parsed = urlparse(HA_URL)
     ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
@@ -185,6 +308,16 @@ def get_areas():
 
     app.logger.debug(f"Processed Areas Map: {areas_map}") # Keep this debug log
     return areas_map
+
+def _refresh_areas_cache():
+    """Background thread function to refresh areas cache."""
+    try:
+        app.logger.debug("Background refresh of areas cache started")
+        areas_map = _fetch_areas()
+        data_cache.set('areas', areas_map)
+        app.logger.debug("Background refresh of areas cache completed")
+    except Exception as e:
+        app.logger.error(f"Error during background refresh of areas: {e}")
 
 @app.route('/')
 def home():
@@ -300,6 +433,31 @@ def activate_entity(entity_id):
         return redirect(url_for('home'))
 
 def get_most_used_entities():
+    """
+    Gets most used entities at current time of day.
+    Uses cache-first approach with background refresh.
+    """
+    # Create cache key based on current hour to ensure time-relevant caching
+    current_hour = datetime.now().hour
+    cache_key = f'most_used_{current_hour}'
+    cached_data = data_cache.get(cache_key)
+    
+    # Return cached data if available
+    if cached_data is not None:
+        app.logger.debug(f"Returning cached most used entities for hour {current_hour}")
+        # Start background refresh if cache is stale
+        if data_cache.is_stale(cache_key):
+            threading.Thread(target=_refresh_most_used_cache, args=(current_hour,), daemon=True).start()
+        return cached_data
+    
+    # No cache available, fetch immediately
+    app.logger.debug(f"No cache available, fetching most used entities for hour {current_hour}")
+    most_used = _fetch_most_used_entities()
+    data_cache.set(cache_key, most_used)
+    return most_used
+
+def _fetch_most_used_entities():
+    """Internal function to fetch most used entities from database."""
     db = get_db()
     cursor = db.cursor()
 
@@ -338,7 +496,52 @@ def get_most_used_entities():
                 'name': entity_name_map[entity_id],
                 'count': count
             })
+            # Limit to top 5 most used items
+            if len(most_used_list) >= 5:
+                break
     return most_used_list
+
+def _refresh_most_used_cache(hour):
+    """Background thread function to refresh most used entities cache."""
+    try:
+        app.logger.debug(f"Background refresh of most used entities cache started for hour {hour}")
+        most_used = _fetch_most_used_entities()
+        data_cache.set(f'most_used_{hour}', most_used)
+        app.logger.debug(f"Background refresh of most used entities cache completed for hour {hour}")
+    except Exception as e:
+        app.logger.error(f"Error during background refresh of most used entities: {e}")
+
+@app.route('/api/refresh-cache')
+def refresh_cache():
+    """Manual cache refresh endpoint for forcing cache updates."""
+    try:
+        app.logger.info("Manual cache refresh triggered")
+        
+        # Clear all most_used cache entries to apply the 5-item limit
+        data_cache.clear_cache_pattern('most_used_')
+        app.logger.info("Cleared all most_used cache entries")
+        
+        # Refresh most_used cache immediately (not in background) to apply 5-item limit
+        current_hour = datetime.now().hour
+        most_used = _fetch_most_used_entities()
+        data_cache.set(f'most_used_{current_hour}', most_used)
+        app.logger.info(f"Immediately refreshed most_used cache for hour {current_hour} with {len(most_used)} items")
+        
+        # Refresh other caches in background threads
+        threading.Thread(target=_refresh_scripts_and_scenes_cache, daemon=True).start()
+        threading.Thread(target=_refresh_areas_cache, daemon=True).start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cache refresh initiated in background (most_used cache cleared)',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        app.logger.error(f"Error during manual cache refresh: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Cache refresh failed: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5003)

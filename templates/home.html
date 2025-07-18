@@ -99,8 +99,19 @@
             const originalText = button.textContent;
             button.textContent = 'Activating...';
             button.disabled = true;
+            button.classList.add('activating');
             
-            // Send activation request
+            // Check if we're currently in area view
+            const isInAreaView = document.getElementById('area-view').style.display !== 'none';
+            
+            // Auto-redirect after 0.5s if in area view (regardless of API response)
+            if (isInAreaView) {
+                setTimeout(() => {
+                    showHome();
+                }, 500);
+            }
+            
+            // Send activation request in background (fire and forget approach)
             fetch(`/activate/${entityId}`, {
                 method: 'GET',
                 headers: {
@@ -108,32 +119,46 @@
                 }
             })
             .then(response => {
-                if (response.ok) {
-                    // Success feedback
-                    button.textContent = 'Activated!';
-                    button.style.backgroundColor = '#28a745';
-                    
-                    // Reset button after delay
-                    setTimeout(() => {
-                        button.textContent = originalText;
-                        button.disabled = false;
-                        button.style.backgroundColor = '';
-                    }, 1500);
-                } else {
-                    throw new Error('Activation failed');
+                // Only handle UI feedback if still on same page
+                if (!isInAreaView) {
+                    if (response.ok) {
+                        button.textContent = 'Activated!';
+                        button.classList.remove('activating');
+                        button.classList.add('success');
+                        
+                        // Reset button after delay if on home page
+                        setTimeout(() => {
+                            button.textContent = originalText;
+                            button.disabled = false;
+                            button.classList.remove('success');
+                        }, 1500);
+                    } else {
+                        button.textContent = 'Error';
+                        button.classList.remove('activating');
+                        button.classList.add('error');
+                        
+                        setTimeout(() => {
+                            button.textContent = originalText;
+                            button.disabled = false;
+                            button.classList.remove('error');
+                        }, 2000);
+                    }
                 }
             })
             .catch(error => {
-                console.error('Error activating entity:', error);
-                button.textContent = 'Error';
-                button.style.backgroundColor = '#dc3545';
-                
-                // Reset button after delay
-                setTimeout(() => {
-                    button.textContent = originalText;
-                    button.disabled = false;
-                    button.style.backgroundColor = '';
-                }, 2000);
+                // Only show error if still on same page
+                if (!isInAreaView) {
+                    console.error('Error activating entity:', error);
+                    button.textContent = 'Error';
+                    button.classList.remove('activating');
+                    button.classList.add('error');
+                    
+                    setTimeout(() => {
+                        button.textContent = originalText;
+                        button.disabled = false;
+                        button.classList.remove('error');
+                    }, 2000);
+                }
             });
         }
         
