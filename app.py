@@ -13,12 +13,9 @@ app.config['SECRET_KEY'] = os.urandom(24)
 
 app.logger.setLevel(logging.INFO) # Set logging level to INFO by default
 
-# Configuration from environment variables
-HA_URL = os.environ.get('HA_URL')
-HA_TOKEN = os.environ.get('HA_TOKEN')
-
-if not HA_URL or not HA_TOKEN:
-    raise ValueError("HA_URL and HA_TOKEN environment variables must be set.")
+# Configuration 
+HA_URL = "<YOUR HA URL AND PORT>"
+HA_TOKEN = "<YOUR API KEY>"
 
 HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
