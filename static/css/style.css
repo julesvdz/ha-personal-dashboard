@@ -1,119 +1,191 @@
-/* General Body and Typography */
+/* Modern Instagram-like Dark Theme */
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #1a1a1a; /* Dark background */
-    color: #e0e0e0; /* Light text */
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #0c0c0c 0%, #1a1a1a 100%);
+    color: #ffffff;
     margin: 0;
-    padding: 20px;
-    line-height: 1.6;
-    display: flex;
-    justify-content: center;
+    padding: 0;
     min-height: 100vh;
     box-sizing: border-box;
 }
 
 .container {
     width: 100%;
-    max-width: 960px; /* Max width for larger screens */
+    max-width: 480px;
+    margin: 0 auto;
     padding: 20px;
-    background-color: #2a2a2a; /* Slightly lighter dark for content area */
-    border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
     box-sizing: border-box;
 }
 
-h1, h2 {
+h2 {
     color: #ffffff;
-    text-align: center;
-    margin-bottom: 20px;
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 16px 0;
+    text-align: left;
 }
 
 /* Section Styling */
 .section {
-    background-color: #3a3a3a;
-    padding: 15px;
-    border-radius: 6px;
-    margin-bottom: 20px;
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+    margin-bottom: 32px;
 }
 
 /* Button Grid Layout */
 .button-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); /* Responsive grid */
-    gap: 15px;
-    justify-content: center;
-    padding: 10px 0;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+    padding: 0;
 }
 
-/* Button Styling */
+/* Modern Button Styling */
 .button {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 15px 10px;
-    background-color: #007bff; /* Primary blue */
+    padding: 20px 16px;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
     color: white;
     text-decoration: none;
-    border-radius: 5px;
-    font-weight: bold;
+    border: none;
+    border-radius: 16px;
+    font-weight: 600;
+    font-size: 14px;
     text-align: center;
-    transition: background-color 0.2s ease, transform 0.1s ease;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    white-space: normal; /* Allow text wrapping */
-    word-wrap: break-word; /* Break long words if necessary */
-    hyphens: auto; /* Add hyphens for better word breaking */
-    min-height: 50px; /* Minimum height for consistency */
-    line-height: 1.3; /* Tighter line spacing for wrapped text */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    white-space: normal;
+    word-wrap: break-word;
+    min-height: 60px;
+    line-height: 1.3;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #7c3aed 0%, #db2777 50%, #f59e0b 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    border-radius: 16px;
+}
+
+.button:hover::before {
+    opacity: 1;
 }
 
 .button:hover {
-    background-color: #0056b3; /* Darker blue on hover */
-    transform: translateY(-2px);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
 }
 
 .button:active {
-    background-color: #004085; /* Even darker on active */
-    transform: translateY(0);
+    transform: translateY(-1px);
 }
 
-/* Back Button Specific Styling */
+.button span {
+    position: relative;
+    z-index: 1;
+}
+
+/* Special styling for most-used buttons */
+.most-used .button {
+    background: linear-gradient(135deg, #f59e0b 0%, #f97316 50%, #ef4444 100%);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.most-used .button::before {
+    background: linear-gradient(135deg, #ea580c 0%, #dc2626 50%, #be123c 100%);
+}
+
+/* Back Button Styling */
 .back-button-container {
     text-align: center;
-    margin-top: 30px;
+    margin-top: 24px;
 }
 
 .back-button {
-    background-color: #6c757d; /* Grey for back button */
+    background: linear-gradient(135deg, #374151 0%, #4b5563 100%) !important;
+    box-shadow: 0 4px 12px rgba(55, 65, 81, 0.3) !important;
 }
 
-.back-button:hover {
-    background-color: #5a6268;
+.back-button::before {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%) !important;
 }
 
-/* Responsive Adjustments */
+/* Button States */
+.button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.button.activating {
+    background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%) !important;
+    animation: pulse 1.5s infinite;
+}
+
+.button.success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
+}
+
+.button.error {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Responsive Design */
 @media (max-width: 600px) {
-    body {
-        padding: 10px;
-    }
-
     .container {
-        padding: 15px;
+        padding: 16px;
     }
 
     .button-grid {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); /* Smaller buttons on small screens */
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 10px;
     }
 
     .button {
-        padding: 12px 8px;
-        font-size: 0.9em;
+        padding: 16px 12px;
+        min-height: 56px;
+        font-size: 13px;
+    }
+
+    h2 {
+        font-size: 16px;
     }
 }
 
 @media (max-width: 400px) {
     .button-grid {
-        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); /* Even smaller for very small screens */
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     }
+    
+    .button {
+        padding: 14px 10px;
+        min-height: 52px;
+        font-size: 12px;
+    }
+}
+
+/* Smooth view transitions */
+#home-view, #area-view {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }

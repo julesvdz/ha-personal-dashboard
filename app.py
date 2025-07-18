@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import requests
-from flask import Flask, render_template, redirect, url_for, g
+from flask import Flask, render_template, redirect, url_for, g, jsonify, request
 from datetime import datetime, timedelta
 import logging
 import websocket # For WebSocket API interaction
@@ -13,9 +13,12 @@ app.config['SECRET_KEY'] = os.urandom(24)
 
 app.logger.setLevel(logging.INFO) # Set logging level to INFO by default
 
-# Configuration (temporarily hardcoded for testing)
-HA_URL = "http://192.168.2.200:8123"
-HA_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIyZmUyNmE3OGZlNDU0YjU5YTY5ZGQ0Yzk1YjI1MjRmOCIsImlhdCI6MTc0OTI4OTQ5MiwiZXhwIjoyMDY0NjQ5NDkyfQ.4L9gU22nBNY2fl0M_--WHBJ5_Bp8AlseIU5GAXhTuuk"
+# Configuration from environment variables
+HA_URL = os.environ.get('HA_URL')
+HA_TOKEN = os.environ.get('HA_TOKEN')
+
+if not HA_URL or not HA_TOKEN:
+    raise ValueError("HA_URL and HA_TOKEN environment variables must be set.")
 
 HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -226,24 +229,56 @@ def home():
     most_used = get_most_used_entities()
     app.logger.debug(f"Home Route - Most Used Entities: {most_used}") # Keep this debug log
 
-    return render_template('home.html', most_used=most_used, areas=display_areas)
+    return render_template('home.html', most_used=most_used, areas=display_areas, entities_by_area=entities_by_area, areas_map=areas_map)
 
-@app.route('/area/<area_id>')
-def area_detail(area_id):
+@app.route('/api/data')
+def api_data():
+    """API endpoint that returns all data as JSON for SPA functionality"""
     all_entities = get_all_scripts_and_scenes()
     areas_map = get_areas()
 
-    if area_id == "other":
-        area_name = "Other"
-        # Filter for entities whose area_id is None or not found in areas_map
-        filtered_entities = [e for e in all_entities if e.get('area_id') is None or e.get('area_id') not in areas_map]
-    else:
-        area_name = areas_map.get(area_id, "Unknown Area")
-        filtered_entities = [e for e in all_entities if e.get('area_id') == area_id]
+    # Group entities by area
+    entities_by_area = {"other": []}
+    for area_id in areas_map:
+        entities_by_area[area_id] = []
 
-    filtered_entities.sort(key=lambda x: x['name'].lower())
+    for entity in all_entities:
+        area_id = entity.get('area_id')
+        if area_id and area_id in entities_by_area:
+            entities_by_area[area_id].append(entity)
+        else:
+            entities_by_area["other"].append(entity)
 
-    return render_template('area.html', area_name=area_name, entities=filtered_entities)
+    # Sort entities within each area
+    for area_id in entities_by_area:
+        entities_by_area[area_id].sort(key=lambda x: x['name'].lower())
+
+    # Prepare areas for display
+    display_areas = []
+    if entities_by_area["other"]:
+        display_areas.append({"area_id": "other", "name": "Other"})
+
+    sorted_area_names = sorted([name for id, name in areas_map.items()])
+    for area_name in sorted_area_names:
+        for area_id, name in areas_map.items():
+            if name == area_name and entities_by_area.get(area_id):
+                display_areas.append({"area_id": area_id, "name": name})
+                break
+
+    # Get most used scripts/scenes
+    most_used = get_most_used_entities()
+
+    return jsonify({
+        'most_used': most_used,
+        'areas': display_areas,
+        'entities_by_area': entities_by_area,
+        'areas_map': areas_map
+    })
+
+@app.route('/area/<area_id>')
+def area_detail(area_id):
+    """Legacy route for backwards compatibility - redirects to home with hash"""
+    return redirect(url_for('home') + f'#{area_id}')
 
 @app.route('/activate/<entity_id>')
 def activate_entity(entity_id):
@@ -255,8 +290,17 @@ def activate_entity(entity_id):
     cursor.execute("INSERT INTO usage_log (entity_id) VALUES (?)", (entity_id,))
     db.commit()
 
-    call_ha_service(domain, service, entity_id)
-    return redirect(url_for('home'))
+    result = call_ha_service(domain, service, entity_id)
+    
+    # Check if this is an AJAX request
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        if result:
+            return jsonify({'success': True, 'message': 'Entity activated successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to activate entity'}), 500
+    else:
+        # Legacy support for direct URL access
+        return redirect(url_for('home'))
 
 def get_most_used_entities():
     db = get_db()

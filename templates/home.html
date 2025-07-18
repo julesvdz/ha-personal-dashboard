@@ -3,27 +3,160 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
-    <h1>Home Assistant Dashboard</h1>
+    <!-- Home View -->
+    <div id="home-view">
+        <div class="section">
+            <h2>Most used at this time of the day</h2>
+            <div id="most-used-container">
+                {% if most_used %}
+                    <div class="button-grid">
+                        {% for entity in most_used %}
+                            <button class="button" onclick="activateEntity('{{ entity.entity_id }}')">{{ entity.name }}</button>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p>No usage data available or no scripts/scenes used recently at this time.</p>
+                {% endif %}
+            </div>
+        </div>
 
-    <div class="section">
-        <h2>Most Used Scripts/Scenes (Last 30 Days, Current Time ±1hr)</h2>
-        {% if most_used %}
+        <div class="section">
+            <h2>Areas</h2>
             <div class="button-grid">
-                {% for entity in most_used %}
-                    <a href="{{ url_for('activate_entity', entity_id=entity.entity_id) }}" class="button">{{ entity.name }}</a>
+                {% for area in areas %}
+                    <button class="button" onclick="showArea('{{ area.area_id }}', '{{ area.name }}')">{{ area.name }}</button>
                 {% endfor %}
             </div>
-        {% else %}
-            <p>No usage data available or no scripts/scenes used recently at this time.</p>
-        {% endif %}
-    </div>
-
-    <div class="section">
-        <h2>Areas</h2>
-        <div class="button-grid">
-            {% for area in areas %}
-                <a href="{{ url_for('area_detail', area_id=area.area_id) }}" class="button">{{ area.name }}</a>
-            {% endfor %}
         </div>
     </div>
+
+    <!-- Area View -->
+    <div id="area-view" style="display: none;">
+        <div class="section">
+            <h2 id="area-title">Area</h2>
+            <div id="area-entities" class="button-grid">
+                <!-- Entities will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <div class="back-button-container">
+            <button class="button back-button" onclick="showHome()">Back to Home</button>
+        </div>
+    </div>
+
+    <!-- Hidden data for JavaScript -->
+    <script type="application/json" id="app-data">
+        {
+            "entities_by_area": {{ entities_by_area | tojson }},
+            "areas_map": {{ areas_map | tojson }},
+            "most_used": {{ most_used | tojson }}
+        }
+    </script>
+
+    <script>
+        // Global app data
+        let appData = JSON.parse(document.getElementById('app-data').textContent);
+        
+        function showArea(areaId, areaName) {
+            // Hide home view, show area view
+            document.getElementById('home-view').style.display = 'none';
+            document.getElementById('area-view').style.display = 'block';
+            
+            // Set area title
+            document.getElementById('area-title').textContent = areaName;
+            
+            // Get entities for this area
+            let entities = appData.entities_by_area[areaId] || [];
+            
+            // Populate area entities
+            const entitiesContainer = document.getElementById('area-entities');
+            entitiesContainer.innerHTML = '';
+            
+            entities.forEach(entity => {
+                const button = document.createElement('button');
+                button.className = 'button';
+                button.textContent = entity.name;
+                button.onclick = () => activateEntity(entity.entity_id);
+                entitiesContainer.appendChild(button);
+            });
+            
+            // Update URL without page reload
+            history.pushState({view: 'area', areaId: areaId, areaName: areaName}, '', `#${areaId}`);
+        }
+        
+        function showHome() {
+            // Hide area view, show home view
+            document.getElementById('area-view').style.display = 'none';
+            document.getElementById('home-view').style.display = 'block';
+            
+            // Update URL without page reload
+            history.pushState({view: 'home'}, '', '/');
+        }
+        
+        function activateEntity(entityId) {
+            // Show loading state
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = 'Activating...';
+            button.disabled = true;
+            
+            // Send activation request
+            fetch(`/activate/${entityId}`, {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Success feedback
+                    button.textContent = 'Activated!';
+                    button.style.backgroundColor = '#28a745';
+                    
+                    // Reset button after delay
+                    setTimeout(() => {
+                        button.textContent = originalText;
+                        button.disabled = false;
+                        button.style.backgroundColor = '';
+                    }, 1500);
+                } else {
+                    throw new Error('Activation failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error activating entity:', error);
+                button.textContent = 'Error';
+                button.style.backgroundColor = '#dc3545';
+                
+                // Reset button after delay
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                    button.style.backgroundColor = '';
+                }, 2000);
+            });
+        }
+        
+        // Handle browser back/forward buttons
+        window.addEventListener('popstate', function(event) {
+            if (event.state) {
+                if (event.state.view === 'area') {
+                    showArea(event.state.areaId, event.state.areaName);
+                } else {
+                    showHome();
+                }
+            } else {
+                showHome();
+            }
+        });
+        
+        // Handle initial page load with hash
+        window.addEventListener('DOMContentLoaded', function() {
+            const hash = window.location.hash.substring(1);
+            if (hash && appData.entities_by_area[hash]) {
+                const areaName = appData.areas_map[hash] || (hash === 'other' ? 'Other' : 'Unknown Area');
+                showArea(hash, areaName);
+            }
+        });
+    </script>
 {% endblock %}
